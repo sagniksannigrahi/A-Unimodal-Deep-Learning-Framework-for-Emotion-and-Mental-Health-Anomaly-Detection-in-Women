@@ -1,0 +1,76 @@
+evalute_models.py
+
+import os
+import numpy as np
+import librosa
+from tensorflow.keras.models import load_model
+from sklearn.metrics import classification_report, accuracy_score
+
+from preprocess import extract_features
+
+# ---------------- PATH SETUP ----------------
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+MODEL_PATH = os.path.join(BASE_DIR, "models", "emotion_model.keras")
+LABELS_PATH = os.path.join(BASE_DIR, "models", "label_classes.npy")
+TEST_PATH = os.path.join(BASE_DIR, "data", "ravdess_test")
+
+# ---------------- LOAD MODEL ----------------
+model = load_model(MODEL_PATH)
+labels = np.load(LABELS_PATH)
+
+print("Model Labels:", labels)
+
+y_true = []
+y_pred = []
+
+# ---------------- EMOTION MAP ----------------
+emotion_map = {
+    "01": "neutral",
+    "03": "happy",
+    "04": "sad",
+    "05": "angry",
+    "06": "fearful",
+    "07": "disgust"
+}
+
+# ---------------- TEST LOOP ----------------
+for root, dirs, files in os.walk(TEST_PATH):
+    for file in files:
+        if file.endswith(".wav"):
+            file_path = os.path.join(root, file)
+
+            try:
+                # ✅ LOAD AUDIO (IMPORTANT FIX)
+                audio, sr = librosa.load(file_path, sr=None)
+
+                # ✅ PASS BOTH audio + sr
+                features = extract_features(audio, sr)
+                features = np.expand_dims(features, axis=0)
+
+                # Predict
+                prediction = model.predict(features, verbose=0)
+                predicted_label = labels[np.argmax(prediction)]
+
+                # True label
+                emotion_code = file.split("-")[2]
+                true_label = emotion_map.get(emotion_code)
+
+                print(f"{file} -> True: {true_label}, Pred: {predicted_label}")
+
+                if true_label is not None and true_label in labels:
+                    y_true.append(true_label)
+                    y_pred.append(predicted_label)
+
+            except Exception as e:
+                print(f"Error processing {file}: {e}")
+
+# ---------------- RESULTS ----------------
+if len(y_true) == 0:
+    print("\n❌ No valid samples found.")
+else:
+    print("\n✅ Total Samples:", len(y_true))
+    print("Accuracy:", accuracy_score(y_true, y_pred))
+
+    print("\nClassification Report:\n")
+    print(classification_report(y_true, y_pred))

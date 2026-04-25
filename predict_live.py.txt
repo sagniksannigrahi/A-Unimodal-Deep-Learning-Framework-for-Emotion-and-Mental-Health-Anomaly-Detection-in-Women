@@ -1,0 +1,92 @@
+predict_live.py
+
+import numpy as np
+import librosa
+import sounddevice as sd
+from tensorflow.keras.models import load_model
+from collections import deque, Counter
+
+# ---------------- SETTINGS ----------------
+SAMPLE_RATE = 22050
+DURATION = 3
+CONFIDENCE_THRESHOLD = 55  # reject weak predictions
+
+# Emotion labels (must match training order EXACTLY)
+EMOTIONS = ['neutral', 'happy', 'sad', 'angry', 'fearful', 'disgust']
+
+# Load trained model
+model = load_model("models/emotion_model.keras")
+
+# store last predictions for smoothing
+history = deque(maxlen=5)
+
+
+# ---------------- AUDIO CLEANING ----------------
+def clean_audio(audio):
+    # remove silence
+    audio, _ = librosa.effects.trim(audio, top_db=25)
+
+    # normalize volume
+    if np.max(np.abs(audio)) > 0:
+        audio = audio / np.max(np.abs(audio))
+
+    return audio
+
+
+# ---------------- FEATURE EXTRACTION ----------------
+def extract_features(audio, sr):
+    audio = clean_audio(audio)
+
+    # MFCC
+    mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
+
+    # normalize MFCC (VERY IMPORTANT 🔥)
+    mfcc = (mfcc - np.mean(mfcc)) / (np.std(mfcc) + 1e-8)
+
+    # fix size (40 x 130)
+    if mfcc.shape[1] < 130:
+        pad = 130 - mfcc.shape[1]
+        mfcc = np.pad(mfcc, ((0, 0), (0, pad)), mode='constant')
+    else:
+        mfcc = mfcc[:, :130]
+
+    return mfcc
+
+
+print("\n🎤 Speak continuously... (Press CTRL+C to stop)\n")
+
+# ---------------- LIVE LOOP ----------------
+while True:
+    # record audio
+    recording = sd.rec(
+        int(DURATION * SAMPLE_RATE),
+        samplerate=SAMPLE_RATE,
+        channels=1
+    )
+    sd.wait()
+
+    audio = recording.flatten()
+
+    # 🔥 ignore very low sound
+    if np.mean(np.abs(audio)) < 0.005:
+        print("⚠️ Speak louder...")
+        continue
+
+    # extract features
+    features = extract_features(audio, SAMPLE_RATE)
+    features = features[np.newaxis, ..., np.newaxis]
+
+    # prediction
+    prediction = model.predict(features, verbose=0)[0]
+    confidence = np.max(prediction) * 100
+    emotion = EMOTIONS[np.argmax(prediction)]
+
+    # reject weak predictions
+    if confidence < CONFIDENCE_THRESHOLD:
+        emotion = "neutral"
+
+    # smoothing (majority voting)
+    history.append(emotion)
+    final_emotion = Counter(history).most_common(1)[0][0]
+
+    print(f"Live Emotion: {final_emotion} ({confidence:.2f}%)")

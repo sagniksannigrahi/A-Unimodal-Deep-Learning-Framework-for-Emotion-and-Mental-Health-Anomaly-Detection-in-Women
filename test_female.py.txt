@@ -1,0 +1,70 @@
+test_female.py
+
+import os
+import librosa
+import numpy as np
+from tensorflow.keras.models import load_model
+
+from preprocess import extract_features
+
+# ---------------- PATH ----------------
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "models", "emotion_model.keras")
+LABELS_PATH = os.path.join(BASE_DIR, "models", "label_classes.npy")
+TEST_PATH = os.path.join(BASE_DIR, "data", "ravdess_test")
+
+# Load model + labels
+model = load_model(MODEL_PATH)
+labels = np.load(LABELS_PATH)
+
+print("\n🚀 Testing on RAVDESS TEST dataset...\n")
+
+correct = 0
+total = 0
+
+for root, dirs, files in os.walk(TEST_PATH):
+    for file in files:
+        if file.endswith(".wav"):
+            try:
+                file_path = os.path.join(root, file)
+
+                # ✅ FIX HERE
+                audio, sr = librosa.load(file_path, sr=22050)
+                features = extract_features(audio, sr)
+
+                features = features / (np.max(features) + 1e-8)
+                features = features[..., np.newaxis]
+                features = np.expand_dims(features, axis=0)
+
+                prediction = model.predict(features, verbose=0)
+                predicted_label = labels[np.argmax(prediction)]
+
+                actual_label = file.split("-")[2]
+
+                emotion_map = {
+                    "01": "neutral",
+                    "03": "happy",
+                    "04": "sad",
+                    "05": "angry",
+                    "06": "fearful",
+                    "07": "disgust"
+                }
+
+                if actual_label in emotion_map:
+                    actual_label = emotion_map[actual_label]
+
+                    print(f"{file} → Predicted: {predicted_label} | Actual: {actual_label}")
+
+                    if predicted_label == actual_label:
+                        correct += 1
+                    total += 1
+
+            except Exception as e:
+                print(f"Error: {file} {e}")
+
+# Accuracy
+if total > 0:
+    accuracy = (correct / total) * 100
+    print(f"\n🎯 RAVDESS Test Accuracy: {accuracy:.2f}%")
+else:
+    print("No test data found.")

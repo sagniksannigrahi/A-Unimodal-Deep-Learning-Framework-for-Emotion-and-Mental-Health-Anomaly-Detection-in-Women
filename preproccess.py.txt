@@ -1,0 +1,87 @@
+preproccess.py
+
+import os
+import librosa
+import numpy as np
+
+# ---------------- SETTINGS ----------------
+SAMPLE_RATE = 22050
+MAX_PAD_LEN = 130
+
+# ---------------- PATH ----------------
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(BASE_DIR, "data", "ravdess_train")
+
+# ---------------- EMOTION MAP ----------------
+emotion_map = {
+    "01": "neutral",
+    "03": "happy",
+    "04": "sad",
+    "05": "angry",
+    "06": "fearful",
+    "07": "disgust"
+}
+
+# ---------------- AUGMENTATION ----------------
+def add_noise(data):
+    noise = 0.005 * np.random.randn(len(data))
+    return data + noise
+
+def shift(data):
+    return np.roll(data, int(len(data) * 0.1))
+
+# ---------------- FEATURE EXTRACTION ----------------
+def extract_features(audio, sr):
+    mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
+
+    # Padding
+    if mfcc.shape[1] < MAX_PAD_LEN:
+        pad_width = MAX_PAD_LEN - mfcc.shape[1]
+        mfcc = np.pad(mfcc, ((0, 0), (0, pad_width)), mode='constant')
+    else:
+        mfcc = mfcc[:, :MAX_PAD_LEN]
+
+    return mfcc
+
+
+# ---------------- LOAD DATASET ----------------
+def load_dataset():
+    X = []
+    y = []
+
+    for root, dirs, files in os.walk(DATA_PATH):
+        for file in files:
+            if file.endswith(".wav"):
+                try:
+                    emotion_code = file.split("-")[2]
+
+                    if emotion_code in emotion_map:
+                        emotion = emotion_map[emotion_code]
+                        file_path = os.path.join(root, file)
+
+                        audio, sr = librosa.load(file_path, sr=SAMPLE_RATE)
+
+                        # 🔥 ORIGINAL
+                        features = extract_features(audio, sr)
+                        X.append(features)
+                        y.append(emotion)
+
+                        # 🔥 AUGMENTATION 1 (noise)
+                        features_noise = extract_features(add_noise(audio), sr)
+                        X.append(features_noise)
+                        y.append(emotion)
+
+                        # 🔥 AUGMENTATION 2 (shift)
+                        features_shift = extract_features(shift(audio), sr)
+                        X.append(features_shift)
+                        y.append(emotion)
+
+                except Exception as e:
+                    print(f"Error processing {file}: {e}")
+
+    X = np.array(X)
+    y = np.array(y)
+
+    print(f"\n🔥 Total samples after augmentation: {len(X)}")
+
+    return X, y
